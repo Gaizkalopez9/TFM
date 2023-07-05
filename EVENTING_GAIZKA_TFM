@@ -1,0 +1,440 @@
+library(rvest)
+library(dplyr)
+library(stringi)
+library(stringr) 
+library(readxl) 
+library(tidyr)
+library(tidyverse)
+library(dbplyr)
+library(RMySQL)
+library(worldfootballR)
+library(png)
+library(openxlsx)
+library(readr)
+
+
+eventing_real <- read.csv("eventing_completo.csv", sep = "\t", stringsAsFactors=FALSE)
+
+
+str(eventing_alvarito, )
+
+# RENOMBRAR COLUMNAS
+eventing_real <- eventing %>% rename(Equipo = `team.name`, Jugador = `player.name`, Rival = `opponentTeam.name`, 
+                                            Posicion = `player.position`, xG = `shot.xg`, xGOT = `shot.postShotXg`, 
+                                            Result = `GOL`, Tiempo = `matchPeriod`, Minuto = `minute`)
+
+
+
+# CREAR COLUMNA RESULT_2
+eventing_tfm$Result_2 <- ifelse(eventing_tfm$GOL == "Completado", "GOL", "NO GOL")
+
+eventing_tfm$Result_2 <- ifelse(RAYO_BARCA_FAVOR$Result == "Completado", "GOL", "NO GOL")
+
+eventing_tfm <- subset(eventing_tfm, select = -GOL)
+
+
+eventing_tfm <- eventing_tfm %>% rename(Result = `Result_2`)
+
+
+
+
+ 
+
+
+# QUITAMOS COLUMNA RESULT Y DESPUES RENOMBRAMOS RESULT_2
+
+RAYO_BARCA_CONTRA <- subset(RAYO_BARCA_CONTRA, select = -Result)
+
+
+RAYO_BARCA_CONTRA <- RAYO_BARCA_CONTRA %>% rename(Result = `Result_2` )
+
+
+
+# REDONDEAR A 2
+eventing_alvarito$xG <- round(eventing_alvarito$xG, 2)
+eventing_alvarito$xGOT <- round(eventing_alvarito$xGOT, 2)
+
+
+
+#FILTRAR POR REAL SOCIEDAD PARA CALCULAR xG
+REAL_XG_INDIVIDUAL <- eventing_alvarito %>%
+  select(Equipo, Jugador, Rival, Resultado ,Tiempo, Minuto ,xG,GOL)%>%
+  filter(Equipo == "Real Sociedad")
+
+# QUITAR NA
+REAL_XG_INDIVIDUAL <- na.omit(REAL_XG_INDIVIDUAL)
+
+
+# SUMAR xG
+REAL_XG_TOTAL <- REAL_XG_INDIVIDUAL %>%
+  select(Equipo,xG) %>%
+  summarise(xG=sum(xG))
+
+
+
+GOLES_PLANTILLA <- eventing_tfm %>%
+  select(Jugador, Equipo,GOL)%>%
+  group_by(Jugador)%>%
+  summarise(GOL=sum(GOL))
+
+
+
+# COLUMNA PARA MAPA TIROS REAL A FAVOR
+REAL_TIROS <- eventing_tfm %>%
+  select(Equipo, Jornada, Jugador, Rival,xG, xGOT, Result, Tipo_Gol , type.primary, location.x, location.y, Minuto, Tiempo) %>%
+  filter(Equipo == "Real Sociedad", type.primary == "shot")
+
+# COLUMNA PARA MAPA TIROS REAL en contra 
+REAL_TIROS_CONTRA <- eventing_tfm %>%
+  select(Equipo, Jornada, Jugador, Rival,xG, xGOT, Result, Tipo_Gol , type.primary, location.x, location.y, Minuto, Tiempo) %>%
+  filter(Rival == "Real Sociedad", type.primary == "shot")
+
+
+
+
+
+# CONECTAR A MySQL
+
+mysqlconnection = dbConnect(RMySQL::MySQL(),
+                            dbname='gaizka',
+                            host='localhost',
+                            port=3306,
+                            user='root',
+                            password='lopo10gl')
+
+
+dbSendQuery(mysqlconnection, "SET GLOBAL local_infile = true;") # <--- Added this
+
+dbListTables(mysqlconnection) # displays the tables available inthisdatabase.
+
+dbWriteTable(mysqlconnection, value = Estadisticas_Recuento, row.names = FALSE, name = "Estadisticas_Recuento", overwrite = TRUE)  
+
+str(PIRAMDE_TOTAL)
+
+
+
+
+
+REAL_GOLES <- eventing_tfm %>%
+  select(Equipo, Jugador, Rival, Resultado ,Tiempo, Minuto ,xG,GOL)%>%
+  mutate(Goles = case_when(
+    GOL == "Completado"  ~ 1
+    TRUE ~ "Otros"
+  ))
+
+
+
+RAYO_BARCA_CONTRA$location.x <- as.numeric( RAYO_BARCA_CONTRA$location.x)
+RAYO_BARCA_CONTRA$location.y <- as.numeric( RAYO_BARCA_CONTRA$location.y)
+
+
+# AHORA VAMOS  A SACAR EL MAPA DE TIROS DEL VARÇA Y RAYO V.
+
+# COLUMNA PARA MAPA TIROS A FAVOR
+RAYO_BARCA_FAVOR <- eventing_tfm %>%
+  select(Equipo, Jornada, Jugador, Rival,xG, xGOT, Result, Tipo_Gol , type.primary, location.x, location.y, Minuto, Tiempo) %>%
+  filter(Equipo %in% c("Barcelona", "Rayo Vallecano") , type.primary == "shot")
+
+# COLUMNA PARA MAPA TIROS REAL en contra 
+RAYO_BARCA_CONTRA <- eventing_tfm %>%
+  select(Equipo, Jornada, Jugador, Rival,xG, xGOT, Result, Tipo_Gol , type.primary, location.x, location.y, Minuto, Tiempo) %>%
+  filter(Rival %in% c("Barcelona", "Rayo Vallecano") , type.primary == "shot")
+
+
+
+
+----------------------------
+  
+  # CREACION PIRAMIDE BARÇA Y RAYO
+
+
+  PIRAMDE_xG <- eventing_tfm %>%
+  select(Equipo, Jornada, Rival, Tiempo,xG,Result)%>%
+  filter( Equipo %in% c("Barcelona", "Rayo Vallecano"))
+
+
+# QUITAR NA
+PIRAMDE_xGA <- na.omit(PIRAMDE_xGA)
+
+
+
+# SUMAR A xG 
+PIRAMDE_xG <- PIRAMDE_xG %>%
+  select(Equipo,Jornada, xG, Tiempo, Rival) %>%
+  group_by(Equipo, Jornada, Tiempo, Rival) %>%
+  summarise(xG=sum(xG))
+
+
+# CREACION PIRAMIDE BARÇA Y RAYO
+
+PIRAMDE_xGA <- eventing_tfm %>%
+  select(Equipo, Jornada, Rival, Tiempo,xG)%>%
+  filter( Rival %in% c("Barcelona", "Rayo Vallecano"))
+
+# SUMAR A xG CONTRA
+PIRAMDE_xGA <- PIRAMDE_xGA %>%
+  select(Equipo,Jornada, xG, Tiempo, Rival) %>%
+  group_by(Equipo, Jornada, Tiempo, Rival) %>%
+  summarise(xG=sum(xG))
+
+
+
+
+PIRAMDE_xGA <- PIRAMDE_xGA[order(PIRAMDE_xGA$Jornada), ]
+
+
+
+# CREACION PIRAMIDE xGOT BARÇA Y RAYO A FAVOR
+
+
+PIRAMDE_xGOT <- eventing_tfm %>%
+  select(Equipo, Jornada, Rival, Tiempo,xGOT,Result)%>%
+  filter( Equipo %in% c("Barcelona", "Rayo Vallecano"))
+
+
+# QUITAR NA
+PIRAMDE_xGOT <- na.omit(PIRAMDE_xGOT)
+
+
+
+# SUMAR A xG 
+PIRAMDE_xGOT <- PIRAMDE_xGOT %>%
+  select(Equipo,Jornada, xGOT, Tiempo, Rival) %>%
+  group_by(Equipo, Jornada, Tiempo, Rival) %>%
+  summarise(xGOT=sum(xGOT))
+
+
+# CREACION PIRAMIDE xGOT BARÇA Y RAYO CONTRA
+
+PIRAMDE_xGOTA <- eventing_tfm %>%
+  select(Equipo, Jornada, Rival, Tiempo,xGOT)%>%
+  filter( Rival %in% c("Barcelona", "Rayo Vallecano"))
+
+# QUITAR NA
+PIRAMDE_xGOTA <- na.omit(PIRAMDE_xGOTA)
+
+# SUMAR A xOTG CONTRA
+PIRAMDE_xGOTA <- PIRAMDE_xGOTA %>%
+  select(Equipo,Jornada, xGOT, Tiempo, Rival) %>%
+  group_by(Equipo, Jornada, Tiempo, Rival) %>%
+  summarise(xGOT=sum(xGOT))
+
+
+
+
+PIRAMDE_xGOTA <- PIRAMDE_xGOTA[order(PIRAMDE_xGOTA$Jornada), ]
+
+---------------------------
+  
+  # CREACION PIRAMIDE xG TOTAL BARÇA Y RAYO
+  
+  
+  PIRAMDE_xG <- eventing_tfm %>%
+  select(Equipo, Jornada, Rival,xG,Result)%>%
+  filter( Equipo %in% c("Barcelona", "Rayo Vallecano"))
+
+
+# QUITAR NA
+PIRAMDE_xG <- na.omit(PIRAMDE_xG)
+
+
+
+# SUMAR A xG 
+PIRAMDE_xG <- PIRAMDE_xG %>%
+  select(Equipo,Jornada, xG, Rival) %>%
+  group_by(Equipo, Jornada, Rival) %>%
+  summarise(xG=sum(xG))
+
+
+PIRAMDE_xGA <- PIRAMDE_xGA[order(PIRAMDE_xGA$Jornada), ]
+
+
+# CREACION PIRAMIDE XGA BARÇA Y RAYO
+
+PIRAMDE_xGA <- eventing_tfm %>%
+  select(Equipo, Jornada, Rival,xG)%>%
+  filter( Rival %in% c("Barcelona", "Rayo Vallecano"))
+
+
+# QUITAR NA
+PIRAMDE_xGA <- na.omit(PIRAMDE_xGA)
+
+# SUMAR A xG CONTRA
+PIRAMDE_xGA <- PIRAMDE_xGA %>%
+  select(Equipo,Jornada, xG, Rival) %>%
+  group_by(Equipo, Jornada, Rival) %>%
+  summarise(xG=sum(xG))
+
+
+
+PIRAMDE_xGA <- PIRAMDE_xGA %>% rename(xGA = `xG`)
+
+
+PIRAMDE_xGA <- PIRAMDE_xGA[order(PIRAMDE_xGA$Rival), ]
+
+
+
+# UNIMOS LAS 2 COLUMNAS
+piramide_merged <- cbind(PIRAMDE_xG, xGA = PIRAMDE_xGA$xGA)
+
+
+
+# CREACION PIRAMIDE xGOT BARÇA Y RAYO A FAVOR
+
+
+PIRAMDE_xGOT <- eventing_tfm %>%
+  select(Equipo, Jornada, Rival, xGOT,Result)%>%
+  filter( Equipo %in% c("Barcelona", "Rayo Vallecano"))
+
+
+# QUITAR NA
+PIRAMDE_xGOT <- na.omit(PIRAMDE_xGOT)
+
+
+
+# SUMAR A xG 
+PIRAMDE_xGOT <- PIRAMDE_xGOT %>%
+  select(Equipo,Jornada, xGOT,Rival) %>%
+  group_by(Equipo, Jornada, Rival) %>%
+  summarise(xGOT=sum(xGOT))
+
+
+# CREACION PIRAMIDE xGOT BARÇA Y RAYO CONTRA
+
+PIRAMDE_xGOTA <- eventing_tfm %>%
+  select(Equipo, Jornada, Rival,xGOT)%>%
+  filter( Rival %in% c("Barcelona", "Rayo Vallecano"))
+
+# QUITAR NA
+PIRAMDE_xGOTA <- na.omit(PIRAMDE_xGOTA)
+
+# SUMAR A xOTG CONTRA
+PIRAMDE_xGOTA <- PIRAMDE_xGOTA %>%
+  select(Equipo,Jornada, xGOT, Rival) %>%
+  group_by(Equipo, Jornada, Rival) %>%
+  summarise(xGOT=sum(xGOT))
+
+
+
+
+PIRAMDE_xGOTA <- PIRAMDE_xGOTA[order(PIRAMDE_xGOTA$Rival), ]
+
+
+
+# CREAR COLUMNA RESULT_2
+eventing_tfm$Result_2 <- ifelse(eventing_tfm$Result == "GOL", "1", "0")
+
+PIRAMDE_xGA <- na.omit(PIRAMDE_xGA)
+
+
+
+# CREACION PIRAMIDE GOLES BARÇA Y RAYO CONTRA
+
+
+GOLES_PLANTILLA <- eventing_tfm %>%
+  select(Jugador, Equipo,Result)%>%
+  group_by(Jugador)%>%
+  summarise(Result=sum(Result))
+
+
+
+
+
+str(PIRAMIDE_TOTAL)
+
+
+
+
+
+# FORMATO EXCELL
+write.xlsx(Estadisticas_Recuento, "Estadisticas_Recuento.xlsx")
+write.xlsx(PIRAMDE_xGA,"PIRAMDE_xGA.xlsx")
+write.xlsx(PIRAMDE_xGOT, "PIRAMDE_xGOT.xlsx")
+write.xlsx(PIRAMDE_xGOTA,"PIRAMDE_xGOTA.xlsx")
+
+
+# FORMATO NATIVO
+saveRDS(eventing_tfm, "eventing_tfm.rds")
+saveRDS(PIRAMIDE TOTAL, "PIRAMIDE TOTAL.rds")
+
+
+---------------------------------------------
+
+# FIVVE THIRTY EIGHT PV
+
+library(readr)
+PV <- read_csv("LEGANES/FIVE THIRTY EIGTH/PV.csv")
+
+PV <- PV [, c("team1", "team2","nsxg1", "nsxg2")]
+
+
+
+PV <- PV %>% rename(Local = "team1"  , Visitante = "team2", PV1 = "nsxg1", PV2 = "nsxg2")
+
+# PV LEGANES LOCAL
+
+PV_PIRAMIDE_LOCAL <- PV %>%
+  select( Local ,Visitante, PV1, PV2) %>%
+  filter( Local %in% c("Barcelona", "Rayo Vallecano")) 
+
+# PV LEGANES VISITANTE
+
+PV_PIRAMIDE_VISITANTE <- PV %>%
+  select( Local ,Visitante, PV1, PV2) %>%
+  filter( Visitante %in% c("Barcelona", "Rayo Vallecano")) 
+
+
+# EXPORTAR EN EXCELL (LEGANES)
+library(openxlsx)
+write.xlsx(PV_PIRAMIDE_LOCAL, "PV_PIRAMIDE_LOCAL.xlsx")
+write.xlsx(PV_PIRAMIDE_VISITANTE, "PV_PIRAMIDE_VISITANTE.xlsx")
+
+
+# PV REAL SOCIEDAD LOCAL
+
+PV_REAL <- PV %>%
+  select( Local ,Visitante, PV1, PV2) %>%
+  filter(Local == "Real Sociedad")
+
+# PV REAL SOCIEDAD VISITANTE
+
+PV_RIVAL <- PV %>%
+  select( Local ,Visitante, PV1, PV2) %>%
+  filter(Visitante == "Real Sociedad")
+
+
+
+# EXPORTAR EN EXCELL (REAL SOCIEDAD)
+
+library(openxlsx)
+write.xlsx(PV_REAL, "PV_REAL_LOCAL.xlsx")
+write.xlsx(PV_RIVAL, "PV_REAL_VISITANTE.xlsx")
+
+# VER ESTRUCTURA
+str(TABLA_DEFINITIVA)
+
+#CONVERTIR A NUMERICO xGOT
+
+TABLA_DEFINITIVA$xGOT_Leganes <- as.numeric(TABLA_DEFINITIVA$xGOT_Leganes)
+TABLA_DEFINITIVA$xGOT_Contra <- as.numeric(TABLA_DEFINITIVA$xGOT_Contra)
+TABLA_DEFINITIVA$PV_Leganes <- as.numeric(TABLA_DEFINITIVA$PV_Leganes)
+TABLA_DEFINITIVA$PV_Contra <- as.numeric(TABLA_DEFINITIVA$PV_Contra)
+
+
+
+# CONECTAR A MySQL
+
+mysqlconnection = dbConnect(RMySQL::MySQL(),
+                            dbname='gaizka',
+                            host='localhost',
+                            port=3306,
+                            user='root',
+                            password='lopo10gl')
+
+
+dbSendQuery(mysqlconnection, "SET GLOBAL local_infile = true;") # <--- Added this
+
+dbListTables(mysqlconnection) # displays the tables available inthisdatabase.
+
+dbWriteTable(mysqlconnection, value = Estadisticas_Recuento, row.names = FALSE, name = "Estadisticas_Recuento", overwrite = TRUE)  
+
